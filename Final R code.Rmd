@@ -1,0 +1,507 @@
+---
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+<h1>STATS 513 Final Project </h1>
+<h1>Yifei Sun </h1>
+<h1>1 Introduction and Data Summary </h1>
+
+<p>
+1. Plot the data using different plotting symbols for the treatment and the control status
+</p>
+
+<p>check the missingness or entry errors of the data</p>
+```{r}
+library(faraway)
+library(corrplot)
+library(GGally)
+library(leaps)
+library(MASS)
+
+# 1 Introduction and Data Summary
+load("FinalExam.RData")
+head(Life_data)
+dim(Life_data)
+# check the missingness or entry errors of the data
+# status is categorical, change it to categorical
+Life_data$Status=factor(Life_data$Status)
+# after using summary, there are many NA in data, remove these NA rows
+Life_data_cleaned=Life_data[complete.cases(Life_data), ]
+# after removing all NAs, the data dimensions we have is 
+dim(Life_data_cleaned)
+# now all rows with one or more NAs are removed
+# because we know for infant.deaths and under.five.deaths, the number can not exceed 1000, and we found there are some data exceeding 1000, which are clearly errors and need to be removed
+Life_data_cleaned=subset(Life_data_cleaned, infant.deaths<=1000|under.five.deaths<=1000)
+# after removing data entry errors, the data dimensions we have is 
+dim(Life_data_cleaned)
+# use histograms to see the distribution of data
+units=c("(years)"," Developed/Developing","(Number per 1000)"," (litres)","(%)"," ","(Number per 1000)","(%)","(%)","(USD)","(years)")
+xlimit=array(c(c(0,100),c(0,100),c(0,1000),c(0,20),c(0,100),c(0,100),c(0,1000),c(0,100),c(0,100),c(0,60000),c(0,25)),dim=c(2,11,1))
+
+```
+
+```{r}
+# Get all varaibles names
+variable.names=names(Life_data_cleaned)
+variable.names
+
+```
+
+
+
+```{r}
+# histograms for infant.deaths and under,five.deaths
+par(mfcol=c(1,2))
+for(i in c(3,7)){
+  hist(Life_data_cleaned[,i], breaks=50, xlab = paste(colnames(Life_data_cleaned)[i],units[i]), main=paste("Histogram of", colnames(Life_data_cleaned)[i], sep=" "), xlim=c(min(Life_data_cleaned[,i])-10,max(Life_data_cleaned[,i])+10))
+}
+
+```
+
+
+
+
+```{r}
+# histograms for Life.expectancy and Alcohol,BMI, schooling,GDP
+par(mfcol=c(1,2))
+for(i in c(1,4,6,10,11)){
+  hist(Life_data_cleaned[,i], breaks=50, xlab = paste(colnames(Life_data_cleaned)[i],units[i]), main=paste("Histogram of", colnames(Life_data_cleaned)[i], sep=" "), xlim=c(min(Life_data_cleaned[,i])-10,max(Life_data_cleaned[,i])+10))
+}
+```
+```{r}
+# histograms for Hepatitis.B and Polio,Diphtheria
+par(mfcol=c(1,2))
+for(i in c(5,8,9)){
+  hist(Life_data_cleaned[,i], breaks=50, xlab = paste(colnames(Life_data_cleaned)[i],units[i]), main=paste("Histogram of", colnames(Life_data_cleaned)[i], sep=" "), xlim=c(min(Life_data_cleaned[,i])-10,max(Life_data_cleaned[,i])+10))
+}
+```
+
+
+```{r}
+# A Comprehensive Graph
+ggpairs(Life_data_cleaned[,c(1,4,6,10,11)],aes(colour=Life_data_cleaned$Status,alpha=0.2))
+ggpairs(Life_data_cleaned[,c(3,7)],aes(colour=Life_data_cleaned$Status,alpha=0.2))
+ggpairs(Life_data_cleaned[,c(5,8,9)],aes(colour=Life_data_cleaned$Status,alpha=0.2))
+
+```
+
+
+
+
+<p>report summary statistics</p>
+```{r}
+summary(Life_data_cleaned)
+```
+<p>By seeing the histograms of each variable, we can get a sense of the distribution of each variables. There could be potentially more errors. For example, in infant deaths and under five deaths,there a few observations with exceptionally high values, some are 500 or 800, which seem to be impossible. And for  Hepatitis.B, Polio and Diphtheria, most of the values are close to 100, but there are a few exceptionally small values, which are also doubtful. And the BMI values are very strange, as I looked up online and find nearly all countries' average BMIs are between 20 and 30. The BMI here could be of different units or calculation methods.These could potentially lead to the inaccuracy of our results.</p>
+
+
+<p>separate the cleaned dataset into training dataset and testing dataset</p>
+```{r}
+train_data<-Life_data_cleaned[1:115,]
+dim(train_data)
+test_data<-Life_data_cleaned[-c(1:115),]
+dim(test_data)
+p_tr=dim(train_data)[2]-1
+p_tr
+n_tr=dim(train_data)[1]
+n_tr
+```
+```{r}
+# do data summary for training dataset and etsting dataset separately
+summary(train_data)
+summary(test_data)
+```
+
+
+
+<p>comment the collinearity between predictors in the training dataset</p>
+
+```{r}
+
+
+result <- lm(Life.expectancy ~ ., data=train_data)
+# check correlation matrix
+plot=cor(train_data[-1,-2])
+corrplot(plot,method = 'number')
+
+# check condition number
+X=model.matrix(result)[,c(-1,-2)]
+e <- eigen(t(X) %*% X)
+e$val
+round(sqrt(e$val[1]/e$val), 3)
+# check variance inflation factor
+round(sort(vif(X),decreasing=TRUE), 3)
+```
+<p>We can see there are some predictors that are highly correlated. under.five.deaths and infant.deaths has a correlation of 0.99, we may remove one of them in the following analysis. Diphtheria and Polio have a high correlation value of 0.74.  Diphtheria and Hepatitis B have a high correlation value of 0.68. Schooling and Life.expectancy has a correlation value of 0.79.We may delete some of those highly correlated predictors, because some of them are of the same category. For example, Diphtheria, Hepatitis.B, Polio are all immunization coverage.  infant.deaths and under.five.deaths are all child death rates. They are supposed to have similar values are thus are highly correlated.Variance inflation factor is defined by $VIF=\frac{1}{1-R^2_j}$, which is related to the R squared of this predictor regressed on other predictors. When $R^2_j$ is close to 1, indicating this predictor can be linearly represented by other predictors, and the VIF will be very large, we can see here infant.deaths and under.five.deaths have very large VIFs. they also has the biggest correlation values. For conditional numbers, >30 is considered large and highly collinear. The conditional number here is 6349.850.</p>
+
+
+<h1>2 Data Analysis </h1>
+<h1>2.1 Data Analysis A.1 </h1>
+```{r}
+# check for leverage points
+halfnorm(lm.influence(result)$hat, nlab = 6,ylab="Leverages")
+```
+<p>97 and 99 observation is likely to be high leverage points because their X matrix rows have exceptional different (large or small) values.</p>
+
+
+```{r}
+# check for outliers
+## Compute studentized residuals
+ti <- rstudent(result)
+sorted_ti=sort(ti,decreasing=TRUE)
+## Compute p-value
+sorted_ti_p=2*(1-pt(abs(sorted_ti), df=n_tr-p_tr-1))
+## compare to alpha/n
+0.05/n_tr
+sum(sorted_ti_p<(0.05/n_tr))
+```
+<p>Using the Bonferroni correction, we can see that there is no observation whose studentized residual has a smaller p value than 0.05/n_tr. This indicates that none of the observation is outlier.</p>
+
+
+
+
+```{r}
+# check for influential points
+cook <- cooks.distance(result)
+halfnorm(cook, nlab = 6, ylab="Cook’s distance")
+country <- row.names(train_data)
+country[97]
+
+```
+<p>We can see the 97th observation, which has the index 1899, has the highest cook's distance, indicating it is an influential point.</p>
+
+<p>After the operation above, we may consider exclude 99th and 97th observation in the analysis as they may be leverage points or influential points.</p>
+```{r}
+# remove 97th and 99th observations
+dim(train_data)
+train_data=train_data[c(-97,-99),]
+dim(train_data)
+```
+
+```{r}
+# first try linear model
+model_linear=lm(Life.expectancy ~., train_data)
+summary(model_linear)
+plot(model_linear)
+summary(lm(sqrt(abs(model_linear$residuals))~model_linear$fitted.value))
+```
+<p>We find that in this model, the parameter of infant.deaths is positive, which indicates more infant deaths lead to higher life expectancy. This is unlikely, and is probably because infant.deaths and under.five.deaths is highly correlated, thus the estimated parameters have a big variance and are unstable. infant.deaths and under.five.deaths are both significant. The significance could be fake as there are collinearity. The QQ plot may indicate the distribution of errors is long tailed. And errors are more likely to have extreme values. We may consider robust methods. The square root of standardized residuals suggest it is linearly related to the fitted values. This suggests we may need to do transformation for the response. Heteroscadesticity observed.</p>
+
+
+
+
+```{r}
+# partial regression plot
+variable.names(train_data)
+delta <- residuals(lm(Life.expectancy ~.-Schooling, data=train_data))
+gamma <- residuals(lm(Schooling ~ .-Schooling-Life.expectancy, data=train_data))
+plot(gamma,delta, xlab="Schooling Residuals",ylab="Life.expectancy Residuals")
+temp <- lm(delta ~ gamma)
+abline(reg=temp)
+delta <- residuals(lm(Life.expectancy ~.-GDP, data=train_data))
+gamma <- residuals(lm(GDP ~ .-GDP-Life.expectancy, data=train_data))
+plot(gamma,delta, xlab="GDP Residuals",ylab="Life.expectancy Residuals")
+temp <- lm(delta ~ gamma)
+abline(reg=temp)
+delta <- residuals(lm(Life.expectancy ~.-Polio, data=train_data))
+gamma <- residuals(lm(Polio ~ .-Polio-Life.expectancy, data=train_data))
+plot(gamma,delta, xlab="Polio Residuals",ylab="Life.expectancy Residuals")
+temp <- lm(delta ~ gamma)
+abline(reg=temp)
+delta <- residuals(lm(Life.expectancy ~.-infant.deaths, data=train_data))
+gamma <- residuals(lm(infant.deaths ~ .-infant.deaths-Life.expectancy, data=train_data))
+plot(gamma,delta, xlab="infant.deaths Residuals",ylab="Life.expectancy Residuals")
+temp <- lm(delta ~ gamma)
+abline(reg=temp)
+delta <- residuals(lm(Life.expectancy ~.-BMI, data=train_data))
+gamma <- residuals(lm(BMI ~ .-BMI-Life.expectancy, data=train_data))
+plot(gamma,delta, xlab="BMI Residuals",ylab="Life.expectancy Residuals")
+temp <- lm(delta ~ gamma)
+abline(reg=temp)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p>We will drop under.five.deaths because it it highly correlated with infant.deaths.Try Box Cox transformation</p>
+```{r}
+g = lm(Life.expectancy ~.-under.five.deaths, train_data)
+boxcox(g, plotit=T, lambda=seq(1, 5, by=0.1))
+
+```
+<p>We can see the 95% confidence interval does not contain 1, there is need to do Box Cox transformation. We will set the lambda to 3. I choose not to do transformation on predictors because there are too many predictors.</p>
+
+```{r}
+model_boxcox=lm(Life.expectancy^(3) ~ .-under.five.deaths, data=train_data)
+summary(model_boxcox)
+summary(lm(sqrt(abs(model_boxcox$residuals))~model_boxcox$fitted.value))
+plot(model_boxcox)
+# residuals vs fitted plot
+plot(model_boxcox$fitted.values^(1/3),model_boxcox$fitted.values^(1/3)-train_data$Life.expectancy, xlab="Fitted Values / Lm(life.expectancy^3~.under.five.deaths", ylab="Residuals", main="Residuals vs Fitted")
+# square root of standardized residuals vs fitted plot
+residuals=model_boxcox$fitted.values^(1/3)-train_data$Life.expectancy
+sigma_hat=sum(residuals^2)/(n_tr-(p_tr+1))
+X=as.matrix(train_data[,c(-1,-2)])
+his=diag(X%*%solve(t(X)%*%X)%*%t(X))
+standardized_residuals=residuals/(sigma_hat*(1-his)^(1/2))
+plot(model_boxcox$fitted.values^(1/3),standardized_residuals^(1/2), xlab="Fitted Values/ Lm(life.expectancy^3~.under.five.deaths", ylab="Square root of standardized Residuals", main="square root of standardized residuals vs fitted plot")
+
+```
+<p>After Box Cox transformation, we find the heteroscadesticity disappeared, so we will retain it.</p>
+
+
+
+
+
+
+
+
+
+
+
+<p>Because there is large collinearity in the predictors, we will do a criterion based variable selection. We will drop under.five.deaths because it it highly correlated with infant.deaths</p>
+```{r}
+b = regsubsets(Life.expectancy^(3) ~ .-under.five.deaths, data=train_data)
+summary(b)
+rs <- summary(b)
+aic <- n_tr*log(rs$rss/n_tr) + (2:9)*2
+which.min(aic)
+which.min(rs$bic)
+which.max(rs$adjr2)
+which.min(rs$cp)
+```
+<p>Using the four criteria above, we can see two of them (AIC and Marllow's Cp) choose the model with five variables. We will use the model with four variables.</p>
+
+
+
+```{r}
+
+model_1=lm(Life.expectancy^(3) ~ Status+Alcohol+BMI+GDP+Schooling, data=train_data)
+summary(model_1)
+plot(model_1)
+summary(lm(sqrt(abs(model_1$residuals))~model_1$fitted.value))
+model_2=lm(Life.expectancy^(3) ~ BMI+GDP+Schooling, data=train_data)
+summary(model_2)
+plot(model_2)
+summary(lm(sqrt(abs(model_2$residuals))~model_2$fitted.value))
+model_3=lm(Life.expectancy^(3) ~ .-infant.deaths-Polio-under.five.deaths, data=train_data)
+summary(model_3)
+plot(model_3)
+summary(lm(sqrt(abs(model_3$residuals))~model_3$fitted.value))
+```
+<p>Here we can see the model_1 we select with 5 predictors has a qq plot indicating the residuals may follow a short tail distribution, which is not a concern we need to worry about because it indicates the residuals have more concentrated distribution than normal distribution. Also, the heteroscadesticity is greatly reduced.However, we will try to use robust methods and see if they make any difference. </p>
+
+
+
+
+```{r}
+gls <- lm(Life.expectancy ~ ., data=train_data)
+summary(gls)
+
+gls_2 <- lm(Life.expectancy ~ .-under.five.deaths, data=train_data)
+summary(gls_2)
+## Least absolute deviations
+library(quantreg)
+glad <- rq(Life.expectancy ~ .-under.five.deaths, data=train_data)
+
+summary(glad)
+
+## Huber’s method
+ghuber <- rlm(Life.expectancy ~ .-under.five.deaths, data=train_data)
+plot(ghuber)
+summary(ghuber)
+2*(1-pt(abs(coef(summary(ghuber)))[,"t value"],df=n_tr-p_tr-1-1))
+```
+
+
+```{r}
+# GAM
+require(mgcv)
+gamod=gam(Life.expectancy ~factor(Status)+s(infant.deaths)+s(Alcohol)+s(Hepatitis.B)+s(BMI)+s(under.five.deaths)+s(Polio)+s(Diphtheria)+s(GDP)+s(Schooling),data=train_data)
+plot(gamod)
+gamod
+summary(gamod)
+```
+
+
+```{r}
+rmse <- function(x, y) { sqrt(mean( (x - y)^2 ))}
+# LASSO
+library(lars)
+set.seed(123)
+trainy <- train_data$Life.expectancy
+trainx <- as.matrix(train_data[,c(-1,-2)])
+modlasso <- lars(trainx,trainy)
+#CV
+modlasso.cv <- cv.lars(trainx,trainy,K=10,index=seq(from = 0.01,
+to = 1, length =100))
+parameter.hat<-modlasso.cv$index[which.min(modlasso.cv$cv)]
+parameter.hat
+testx <- as.matrix(test_data[,c(-1,-2)])
+predlars <- predict(modlasso,testx,s=parameter.hat,mode="fraction")
+rmse(test_data$Life.expectancy, predlars$fit)
+
+library(glmnet)
+mod=glmnet(as.matrix(train_data[,c(-1,-2)]),train_data$Life.expectancy)
+library(plotmo)
+plot_glmnet(mod,main="Coefficients using LASSO, when lambda is chosen to be different values")  
+model_lasso=glmnet(as.matrix(train_data[,c(-1,-2)]),train_data$Life.expectancy,alpha=1,lambda=0.25)
+plot(coef(model_lasso),type="h",ylab="Coefficient",main="Coefficients using LASSO, using optimal lambda by CV")
+coef(model_lasso)
+```
+
+```{r}
+#Ridge regression
+lambda.set=seq(0, 5, len=201)
+modrg <- lm.ridge(Life.expectancy ~ ., train_data, lambda = lambda.set)
+plot(x=lambda.set,y=modrg$GCV,xlab=expression(lambda),ylab="GCV")
+which.min(modrg$GCV)
+plot(modrg)
+select(modrg)
+model_ridge=lm.ridge(Life.expectancy ~ ., train_data,lambda = 0.075)
+summary(model_ridge)
+coef(model_ridge)
+plot(coef(model_ridge),type="h",ylab="Coefficient",main="Coefficients using Ridge, using optimal lambda by GCV")
+```
+
+
+
+```{r}
+
+
+rmse <- function(x, y) { sqrt(mean( (x - y)^2 ))}
+# boxcox transformation, lambda=3, Life.expectancy^(3) ~ Status+Alcohol+BMI+GDP+Schooling
+rmse((model_1$fitted.values)^(1/3),train_data$Life.expectancy)
+rmse((predict(model_1,newdata=test_data))^(1/3),test_data$Life.expectancy)
+# linear model, no transformation, keep under.five.deaths
+rmse((model_linear$fitted.values),train_data$Life.expectancy)
+rmse((predict(model_linear,newdata=test_data)),test_data$Life.expectancy)
+# linear model, no transformation, Life.expectancy ~.-under.five.deaths
+rmse((g$fitted.values),train_data$Life.expectancy)
+rmse((predict(g,newdata=test_data)),test_data$Life.expectancy)
+# Life.expectancy^(3) ~ BMI+GDP+Schooling
+rmse((model_2$fitted.values)^(1/3),train_data$Life.expectancy)
+rmse((predict(model_2,newdata=test_data))^(1/3),test_data$Life.expectancy)
+# Life.expectancy^(3) ~ .-infant.deaths-Polio-under.five.deaths
+rmse((model_3$fitted.values)^(1/3),train_data$Life.expectancy)
+rmse((predict(model_3,newdata=test_data))^(1/3),test_data$Life.expectancy)
+# Huber Life.expectancy ~ .-under.five.deaths
+rmse((ghuber$fitted.values),train_data$Life.expectancy)
+rmse((predict(ghuber,newdata=test_data)),test_data$Life.expectancy)
+# GAM Life.expectancy ~factor(Status)+s(infant.deaths)+s(Alcohol)+s(Hepatitis.B)+s(BMI)+s(under.five.deaths)+s(Polio)+s(Diphtheria)+s(GDP)+s(Schooling)
+rmse((gamod$fitted.values),train_data$Life.expectancy)
+rmse((predict(gamod,newdata=test_data)),test_data$Life.expectancy)
+# Least absolute deviations
+rmse((glad$fitted.values),train_data$Life.expectancy)
+rmse((predict(glad,newdata=test_data)),test_data$Life.expectancy)
+
+
+
+anova(model_1,model_2)
+
+```
+<p> Though GAM has the smallest rmse, it can not be easily interpreted. Model_1 has the smallest rmse. We will select model_1, because it is a balance between the number of predictors and the residual sum of squares. We try to use the smallest number of predictors to get the smallest RSS.For robust methods, the rmse is similar to normal methods.We will still keep the simple model.</p>
+
+
+
+
+```{r}
+summary(model_1)
+confint(model_1)
+```
+<p>First I eliminate all rows with NAs, and rows with data entry errors(infant.deaths and under.five.deaths greater than 1000). I find that there is collinearity in the predcitors, because some of the predictors have similar meaning, such as infant or child death rate, or vaccination rate. Second, I eliminate some influential points and leverage points. After doing the linear models with all predictors, I found the parameter of infant.deaths is positive, which is not reasonable. It could be the unstable results of collinearity. So we remove under.five.deaths and do the linear model again. After doing diagnostics, I find there is some heteroscadesticity in residuals and residuals seem to be long-tailed distributed. I tried Box-Cox transformation to the response to the power of 3. I find that after response transformation, the heteroscadesiticity disappear and the residuals follow short-tailed distribution. After do variable selection, we choose five predictors:StatusDeveloping, Alcohol, BMI, GDP, Schooling, because they have the smallest AIC and Marllow's Cp. I tried different robust methods and find their rmse are not significantly different from least square method.</p>
+<p>The final model I choose is $Life.expectancy=(44780-47520*StatusDeveloping-3405Alcohol+756.5BMI+1.169GDP+27380Schooling)^{1/3}$</p>
+<p>After transformation, the model is harder to interpret. From the result, it is concluded that The cubic of life expectancy is linearly related to BMI, Schooling, Alcohol, GDP, and Status.The coefficient for StatusDeveloping is -47520 (95% confidence interval is (-97099, 2057) not significant), demonstrating that holding all other factors constant, developing countries reduce the cubic of life expectancy by an average of 47520 relative to developed countries. The coefficient for Alcohol is -3405 (95% confidence interval is (-8106, 1296) not significant), demonstrating that holding all other factors constant, a unit more alcohol consumption reduce the cubic of life expectancy by an average of 3405. The coefficient for BMI is 756 (95% confidence interval is (163, 1496) significant), demonstrating that holding all other factors constant, a unit more BMI increase the cubic of life expectancy by an average of 756. The coefficient for GDP is 1.169 (95% confidence interval is (0.294, 2.633) not significant), demonstrating that holding all other factors constant, a unit more GDP increase the cubic of life expectancy by an average of 1.169.  The coefficient for Schooling is 27380 (95% confidence interval is (20558, 34205) very significant), demonstrating that holding all other factors constant, a unit more Schooling increase the cubic of life expectancy by an average of 27380.</p>
+
+```{r}
+
+plot((model_1$fitted.values)^(1/3),train_data$Life.expectancy,xlab="fitted values",ylab="observed values", main="traning data")
+abline(0,1)
+plot((predict(model_1,newdata=test_data))^(1/3),test_data$Life.expectancy,xlab="predicted values",ylab="observed values", main="testing data")
+abline(0,1)
+
+```
+<p>We can see the performance of our final model is pretty good. The training data and testing data are closed to our predicted values. The adjusted R2 is close to 0.7 which shows our model has pretty good explanatory ability. And it has relatively small rmse than other models with different variable combinations. Judging from the F test of all predictors, we find that they are significant when combined together. We found that schooling is very significant here. And BMI is also significant. The other predictors are not significant, but they help in the prediction.The parameters of different predictors tell use that long schooling years lead to longer life expectancy. Developing countries have shorter life expectancy than developed countries. Also more alcohol leads to shorter life expectancy.</p>
+
+
+
+<h1>2.2 Data Analysis A.2 </h1>
+
+```{r}
+model_interact_BMI=lm(Life.expectancy^(3) ~ Status+Alcohol+BMI+GDP+Schooling+Status:BMI, data=train_data)
+summary(model_interact_BMI)
+anova(model_interact_BMI, model_1)
+
+
+model_interact_Schooling=lm(Life.expectancy^(3) ~ Status+Alcohol+BMI+GDP+Schooling+Status:Schooling, data=train_data)
+summary(model_interact_Schooling)
+anova(model_interact_Schooling, model_1)
+```
+<p>Here I tried two models with interaction terms of schooling and BMI respectively. After F test I found that the p value for BMI is very big (which is 0.5125), indicating the original model and model with interaction term is not significantly different. For schooling, though the p value is also bigger than 0.05, but it is only slightly bigger (which is 0.06578), indicating that it is relatively significant. So I think developed and developing makes bigger difference in the parameter of schooling.</p>
+
+
+```{r}
+model_interact_1=lm(Life.expectancy^(3) ~ Status+Alcohol+BMI+GDP+Schooling+Status:BMI+Status:Schooling, data=train_data)
+summary(model_interact_1)
+anova(model_interact_1, model_1)
+```
+<p>From the anova results, we can see that these two models do not have significantly different RSS. Therefore, from the perspective of results, they are not fundamentally different. We can not say the model with interaction term is significantly better than the model without interaction terms. But we can see that for developing countries and developed countries, their parameters for BMI have different values. For developed countries, the parameter is 1.463e+03, which means larger BMI values will increase life expectancy greatly, while for developing countries, the parameter for BMI is 1.463e+03-9.697e+02, which means larger BMI values will increase life expectancy slightly.</p>
+
+
+```{r}
+
+train_data_developed=train_data[which(train_data$Status=="Developed"),]
+train_data_developing=train_data[which(train_data$Status=="Developing"),]
+model_1_developed=lm(Life.expectancy^(3) ~ Alcohol+BMI+GDP+Schooling, data=train_data_developed)
+summary(model_1_developed)
+model_1_developing=lm(Life.expectancy^(3) ~ Alcohol+BMI+GDP+Schooling, data=train_data_developing)
+summary(model_1_developing)
+```
+<p>After separating the train dataset into two datasets with status being developed and developing, and do the linear model separately, the parameters we get are different, and has different P values. The schooling factor is only significant in the developing dataset. We can see this result is the same as the result below, because here we use the same assumption, which is we assume for Alcohol, BMI, GDP, Schooling, when the status is different (developed or developing), the parameters for these factors are also different.</p>
+
+
+
+
+
+```{r}
+model_interact_2=lm(Life.expectancy^(3) ~ (Status+Alcohol+BMI+GDP+Schooling)*Status, data=train_data)
+summary(model_interact_2)
+
+
+```
+<p>Because the parameters of interaction terms will affect the parameter of the other continuous predictor, we need to compare the absolute value of the basic parameter and the parameter of the interaction term. For Alcohol, the basic parameter is 2.114e+03 (when the country is a developed country) and when the country is a developing country, the parameter is (2.114e+03-6.457e+03), which becomes negative. For BMI(1.656e+03, 1.656e+03-1.135e+03), GDP(2.234e+00, 2.234e+00-8.846e-01) and schooling(4.522e+03, 4.522e+03+2.535e+04), it is the same, the parameters of these predictors are changed a lot when the country is a developed country ot a developing country, both the magnitudes and signs. So we know for sure that these factors have different effects between developing and developed countries. 
+</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
